@@ -1,0 +1,15 @@
+{
+  "name": "chloe-bot",
+  "version": "1.0.0",
+  "description": "Bot Telegram avec persona Chloé",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
