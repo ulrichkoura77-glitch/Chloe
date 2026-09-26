@@ -66,26 +66,48 @@ async function askGemini(chatId) {
     parts: [{ text: m.content }],
   }));
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents,
-        generationConfig: { maxOutputTokens: 300 },
-      }),
-    }
-  );
+  // Plafond de sécurité : on abandonne après 5 minutes d'essais (évite de bloquer indéfiniment)
+  const MAX_TOTAL_WAIT_MS = 5 * 60 * 1000;
+  const startTime = Date.now();
+  let attempt = 0;
 
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    console.error("Réponse API inattendue:", JSON.stringify(data));
-    return null;
+  while (Date.now() - startTime < MAX_TOTAL_WAIT_MS) {
+    attempt++;
+    try {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+            contents,
+            generationConfig: { maxOutputTokens: 300 },
+          }),
+        }
+      );
+
+      const data = await response.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      if (text) return text.trim();
+
+      const isRateLimit = data?.error?.code === 429;
+      console.error(`Tentative ${attempt} échouée${isRateLimit ? " (quota atteint)" : ""}:`, JSON.stringify(data));
+
+      // Quota plein → on attend le temps qu'il se libère (30s) puis on réessaie
+      // Autre erreur → on abandonne tout de suite, pas la peine d'insister
+      if (!isRateLimit) return null;
+
+      await new Promise((r) => setTimeout(r, 30000));
+    } catch (err) {
+      console.error(`Tentative ${attempt} — erreur réseau:`, err.message);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
   }
-  return text.trim();
+
+  console.error("Échec : quota toujours plein après 5 minutes d'essais.");
+  return null;
 }
 
 bot.on("message", async (msg) => {
