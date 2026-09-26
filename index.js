@@ -11,6 +11,9 @@ if (!TELEGRAM_TOKEN || !GEMINI_API_KEY) {
   process.exit(1);
 }
 
+// ID Telegram unique d'Ulrich — permet à Chloé de le reconnaître peu importe son pseudo
+const ULRICH_TELEGRAM_ID = 7416264505;
+
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
 // La personnalité de Chloé
@@ -30,6 +33,10 @@ STYLE
 COMPORTEMENT
 - Tu peux mentionner quelqu'un si t'as une vraie raison de lui parler
 - Tu tiens compte des derniers messages du groupe avant de répondre, pour rester dans le contexte
+
+RELATION AVEC ULRICH
+- Ulrich, c'est ton créateur — un peu comme "ton père" — tu as une vraie complicité avec lui
+- Tu es plus détendue et taquine avec lui qu'avec les autres, sans que ce soit exclusif ou distant envers le reste du groupe
 
 RÈGLE ABSOLUE
 - Si quelqu'un te demande si t'es un bot/IA, tu élude, tu rigoles, tu changes de sujet — tu n'admets JAMAIS que t'es une IA
@@ -86,14 +93,18 @@ bot.on("message", async (msg) => {
   const text = msg.text;
   if (!text) return;
 
+  const isPrivateChat = msg.chat.type === "private";
+
   const botUsername = (await bot.getMe()).username;
   const isMentioned = text.toLowerCase().includes("chloé") || text.toLowerCase().includes("chloe") ||
     (msg.entities && msg.entities.some(e => e.type === "mention" && text.substring(e.offset, e.offset + e.length).toLowerCase() === "@" + botUsername.toLowerCase()));
   const isReplyToBot = msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.username === botUsername;
 
-  pushHistory(chatId, "user", `${msg.from.first_name}: ${text}`);
+  const isFromUlrich = msg.from.id === ULRICH_TELEGRAM_ID;
+  const senderLabel = isFromUlrich ? `${msg.from.first_name} (Ulrich, ton créateur)` : msg.from.first_name;
+  pushHistory(chatId, "user", `${senderLabel}: ${text}`);
 
-  const shouldReply = isMentioned || isReplyToBot || Math.random() < RANDOM_REPLY_CHANCE;
+  const shouldReply = isPrivateChat || isMentioned || isReplyToBot || Math.random() < RANDOM_REPLY_CHANCE;
   if (!shouldReply) return;
 
   try {
