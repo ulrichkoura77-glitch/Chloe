@@ -1,13 +1,13 @@
-// Bot Telegram "Chloé" — connecté à l'API Google Gemini (gratuit, sans carte bancaire)
+// Bot Telegram "Chloé" — connecté à l'API Groq (gratuit, sans carte bancaire, quota généreux)
 // Pas besoin de comprendre ce fichier, juste de le déployer tel quel.
 
 const TelegramBot = require("node-telegram-bot-api");
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-if (!TELEGRAM_TOKEN || !GEMINI_API_KEY) {
-  console.error("❌ Il manque TELEGRAM_TOKEN ou GEMINI_API_KEY dans les variables d'environnement.");
+if (!TELEGRAM_TOKEN || !GROQ_API_KEY) {
+  console.error("❌ Il manque TELEGRAM_TOKEN ou GROQ_API_KEY dans les variables d'environnement.");
   process.exit(1);
 }
 
@@ -58,55 +58,51 @@ function pushHistory(chatId, role, content) {
   }
 }
 
-async function askGemini(chatId) {
-  // Gemini n'a pas de rôle "system" séparé comme Claude : on colle
-  // la personnalité en première instruction, puis l'historique.
-  const contents = chatHistory[chatId].map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
-  }));
+async function askGroq(chatId) {
+  const messages = [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...chatHistory[chatId],
+  ];
 
-  // Plafond de sécurité : on abandonne après 5 minutes d'essais (évite de bloquer indéfiniment)
-  const MAX_TOTAL_WAIT_MS = 5 * 60 * 1000;
+  // Plafond de sécurité : on abandonne après 3 minutes d'essais (évite de bloquer indéfiniment)
+  const MAX_TOTAL_WAIT_MS = 3 * 60 * 1000;
   const startTime = Date.now();
   let attempt = 0;
 
   while (Date.now() - startTime < MAX_TOTAL_WAIT_MS) {
     attempt++;
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-            contents,
-            generationConfig: { maxOutputTokens: 300 },
-          }),
-        }
-      );
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages,
+          max_tokens: 300,
+        }),
+      });
 
       const data = await response.json();
-      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const text = data?.choices?.[0]?.message?.content;
 
       if (text) return text.trim();
 
-      const isRateLimit = data?.error?.code === 429;
+      const isRateLimit = response.status === 429;
       console.error(`Tentative ${attempt} échouée${isRateLimit ? " (quota atteint)" : ""}:`, JSON.stringify(data));
 
-      // Quota plein → on attend le temps qu'il se libère (30s) puis on réessaie
-      // Autre erreur → on abandonne tout de suite, pas la peine d'insister
       if (!isRateLimit) return null;
 
-      await new Promise((r) => setTimeout(r, 30000));
+      await new Promise((r) => setTimeout(r, 15000));
     } catch (err) {
       console.error(`Tentative ${attempt} — erreur réseau:`, err.message);
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
 
-  console.error("Échec : quota toujours plein après 5 minutes d'essais.");
+  console.error("Échec : quota toujours plein après plusieurs minutes d'essais.");
   return null;
 }
 
@@ -131,7 +127,7 @@ bot.on("message", async (msg) => {
 
   try {
     bot.sendChatAction(chatId, "typing");
-    const reply = await askGemini(chatId);
+    const reply = await askGroq(chatId);
     if (reply) {
       pushHistory(chatId, "assistant", reply);
       // Petit délai pour paraître plus naturelle
